@@ -1,0 +1,122 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+
+void printMatrix(double *mat, int n) {
+    printf("%d\n", n);
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            printf("%f ", mat[i * n + j]);
+        }
+        printf("\n");
+    }
+}
+
+void readMatrixFromFile(char *filename, double **mat, int *n, int rank, int size) {
+    FILE *file = fopen(filename, "r");
+    if (!file) {
+        if (rank == 0) {
+            printf("Error opening file %s\n", filename);
+        }
+        MPI_Finalize();
+        exit(1);
+    }
+
+    if (rank == 0) {
+        fscanf(file, "%d", n);
+        if (*n % size != 0) {
+            printf("Number of rows must be divisible by the number of processes.\n");
+            fclose(file);
+            MPI_Finalize();
+            exit(1);
+        }
+
+        *mat = (double *)malloc((*n) * (*n) * sizeof(double));
+        for (int i = 0; i < (*n) * (*n); i++) {
+            fscanf(file, "%lf", &(*mat)[i]);
+        }
+        fclose(file);
+    }
+}
+
+void matrix_inversion(double *mat, int n) {
+    double *identity = (double *)malloc(n * n * sizeof(double));
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            identity[i * n + j] = (i == j) ? 1.0 : 0.0;
+        }
+    }
+
+    // Gauss-Jordan e
+    for (int i = 0; i < n; i++) {
+        double divisor = mat[i * n + i];
+        for (int j = 0; j < n; j++) {
+            mat[i * n + j] /= divisor;
+            identity[i * n + j] /= divisor;
+        }
+
+        for (int j = 0; j < n; j++) {
+            if (j != i) {
+                double factor = mat[j * n + i];
+                for (int k = 0; k < n; k++) {
+                    mat[j * n + k] -= factor * mat[i * n + k];
+                    identity[j * n + k] -= factor * identity[i * n + k];
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < n * n; i++) {
+        mat[i] = identity[i];
+    }
+    free(identity);
+}
+
+void performMatrixOperations(int n, int size, int rank, double *mat) {
+    MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    int rows_per_process = n / size;
+    double *local_mat = (double *)malloc(rows_per_process * n * sizeof(double));
+    MPI_Scatter(mat, rows_per_process * n, MPI_DOUBLE, local_mat, rows_per_process * n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+
+    double *result_mat = NULL;
+    if (rank == 0) {
+        result_mat = (double *)malloc(n * n * sizeof(double));
+    }
+    MPI_Gather(local_mat, rows_per_process * n, MPI_DOUBLE, result_mat, rows_per_process * n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        matrix_inversion(result_mat, n);  
+        printMatrix(result_mat, n);
+        free(result_mat);
+    }
+
+    free(local_mat);
+}
+
+
+int main(int argc, char *argv[]) {
+    int rank, size, n;
+    double *mat;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    if (argc != 2) {
+        if (rank == 0) {
+            printf("Usage: %s <input_file>\n", argv[0]);
+        }
+        MPI_Finalize();
+        return 1;
+    }
+
+    char *filename = argv[1];
+    readMatrixFromFile(filename, &mat, &n, rank, size);
+
+    performMatrixOperations(n, size, rank, mat);
+
+    MPI_Finalize();
+    return 0;
+}
