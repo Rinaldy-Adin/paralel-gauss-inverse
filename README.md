@@ -1,4 +1,5 @@
 # Tugas Kecil - Paralel Inverse Matrix
+## K02 - Kelompok 13 - Siskom
 
 Paralelisasi prograrm dilakukan dengan menggunakan MPI_Comm_rank dan MPI_Comm_size untuk mendapatkan rank dari masing-masing proses dan jumlah total proses yang sedang berjalan. Untuk mencegah duplikasi maka matriks hanya akan dibaca pada rank 0, lalu kemudian ukurannya akan dibroadcast dengan menggunakan MPI_Bcast dan input dibagi antara proses-proses dengan menggunakan MPI_Scatter. Setelah itu, proses inversi dilakukan pada matriks lokal dan hasilnya dikumpulkan kembali di rank 0 dengan menggunakan MPI_Gather. Hasil dari setiap proses tersebut kemudian akan digabungkan lagi sehingga akhirnya menjadi matriks yang lengkap.
 
