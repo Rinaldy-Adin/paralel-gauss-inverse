@@ -40,17 +40,35 @@ int readMatrixFromFile(char *filename, double **mat, int *n, int rank, int size)
     return 0;
 }
 
-void matrix_inversion(double *mat, int n, int local_n, int start_row, int end_row) {
+void partialPivoting(double *mat, double *ident, int n) {
+    double d;
+    for(int i = n; i > 1; i--) {
+        if(mat[(i-1) * n + 1] < mat[i * n + 1]) {
+            for(int j = 0; j < n; j++) {
+                d = mat[i * n  + j];
+                mat[i * n  + j] = mat[(i-1) * n + j];
+                mat[(i-1) * n + j] = d;
+
+                d = ident[i * n  + j];
+                ident[i * n  + j] = ident[(i-1) * n + j];
+                ident[(i-1) * n + j] = d;
+            }
+        }
+    }
+}
+
+void generateIdent(double *ident, int n) {
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            ident[i * n + j] = (i == j) ? 1.0 : 0.0;
+        }
+    }
+}
+
+void matrix_inversion(double *mat, double *identity, int n, int local_n, int start_row, int end_row) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    double *identity = (double *)malloc(local_n * n * sizeof(double));
-    for (int i = start_row; i < end_row; i++) {
-        for (int j = 0; j < n; j++) {
-            identity[(i - start_row) * n + j] = (i == j) ? 1.0 : 0.0;
-        }
-    }
 
     // Gauss-Jordan
     double *pivot_mat = (double *)malloc(n * sizeof(double));
@@ -83,15 +101,9 @@ void matrix_inversion(double *mat, int n, int local_n, int start_row, int end_ro
             }
         }
     }
-
-    for (int i = 0; i < local_n * n; i++) {
-        mat[i] = identity[i];
-    }
-
-    free(identity);
 }
 
-void performMatrixOperations(int n, int size, int rank, double *mat) {
+void performMatrixOperations(int n, int size, int rank, double *mat, double *ident) {
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     int rows_per_process = n / size;
@@ -107,15 +119,17 @@ void performMatrixOperations(int n, int size, int rank, double *mat) {
     }
 
     double *local_mat = (double *)malloc(sendcounts[rank] * sizeof(double));
+    double *local_ident = (double *)malloc(sendcounts[rank] * sizeof(double));
     MPI_Scatterv(mat, sendcounts, displs, MPI_DOUBLE, local_mat, sendcounts[rank], MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Scatterv(ident, sendcounts, displs, MPI_DOUBLE, local_ident, sendcounts[rank], MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    matrix_inversion(local_mat, n, sendcounts[rank] / n, displs[rank] / n, (displs[rank] + sendcounts[rank]) / n);
+    matrix_inversion(local_mat, local_ident, n, sendcounts[rank] / n, displs[rank] / n, (displs[rank] + sendcounts[rank]) / n);
 
     double *result_mat = NULL;
     if (rank == 0) {
         result_mat = (double *)malloc(n * n * sizeof(double));
     }
-    MPI_Gatherv(local_mat, sendcounts[rank], MPI_DOUBLE, result_mat, sendcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(local_ident, sendcounts[rank], MPI_DOUBLE, result_mat, sendcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
         printMatrix(result_mat, n);
@@ -123,6 +137,7 @@ void performMatrixOperations(int n, int size, int rank, double *mat) {
     }
 
     free(local_mat);
+    free(local_ident);
     free(sendcounts);
     free(displs);
 }
@@ -130,7 +145,7 @@ void performMatrixOperations(int n, int size, int rank, double *mat) {
 
 int main(int argc, char *argv[]) {
     int rank, size, n;
-    double *mat;
+    double *mat, *ident;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -148,9 +163,17 @@ int main(int argc, char *argv[]) {
     int fail_read = readMatrixFromFile(filename, &mat, &n, rank, size);
 
     if (!fail_read) {
-        performMatrixOperations(n, size, rank, mat);
+        if (rank == 0) {
+            ident = (double *)malloc(n * n * sizeof(double));
+            generateIdent(ident, n);
+            partialPivoting(mat, ident, n);
+        }
+
+        performMatrixOperations(n, size, rank, mat, ident);
+
         if (rank == 0) {
             free(mat);
+            free(ident);
         }
     }
     MPI_Finalize();
