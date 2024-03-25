@@ -12,14 +12,20 @@ void printMatrix(double *mat, int n) {
     }
 }
 
-void readMatrixFromFile(char *filename, double **mat, int *n, int rank, int size) {
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        if (rank == 0) {
+int readMatrixFromFile(char *filename, double **mat, int *n, int rank, int size) {
+    int ok = 1;
+    FILE *file;
+    if (rank == 0) {
+        file = fopen(filename, "r");
+        if (!file) {
             printf("Error opening file %s\n", filename);
+            ok = 0;
         }
-        MPI_Finalize();
-        exit(1);
+    }
+
+    MPI_Bcast(&ok, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    if (!ok) {
+        return 1;
     }
 
     if (rank == 0) {
@@ -31,6 +37,7 @@ void readMatrixFromFile(char *filename, double **mat, int *n, int rank, int size
         }
         fclose(file);
     }
+    return 0;
 }
 
 void matrix_inversion(double *mat, int n, int local_n, int start_row, int end_row) {
@@ -138,9 +145,15 @@ int main(int argc, char *argv[]) {
     }
 
     char *filename = argv[1];
-    readMatrixFromFile(filename, &mat, &n, rank, size);
+    int fail_read = readMatrixFromFile(filename, &mat, &n, rank, size);
 
-    performMatrixOperations(n, size, rank, mat);
+    if (!fail_read) {
+        performMatrixOperations(n, size, rank, mat);
+        if (rank == 0) {
+            free(mat);
+        }
+    }
     MPI_Finalize();
+
     return 0;
 }
