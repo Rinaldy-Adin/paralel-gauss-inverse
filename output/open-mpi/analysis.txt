@@ -1,0 +1,50 @@
+The program is able to run on the VM, with right inverse matrix and lesser time. However, by the time we test the cases, the VM was so crowded and busy so the time cannot be calculated accurately (proof in screenshot.png). Here's the time report.
+
+time mpirun -hostfile hosts.txt -np 4 ./mpi 32.txt > 32_np4.txt
+
+real	0m18.778s
+user	0m0.119s
+sys	0m0.076s
+
+k02-13@vm-1:~$ time mpirun -hostfile hosts.txt -np 4 ./mpi 64.txt > 64_np4.txt
+
+real	0m10.219s
+user	0m0.110s
+sys	0m0.091s
+
+k02-13@vm-1:~$ time mpirun -hostfile hosts.txt -np 4 ./mpi 128.txt > 128_np4.txt 
+real	0m17.662s
+user	0m0.120s
+sys	0m0.115s
+
+k02-13@vm-1:~$ time mpirun -hostfile hosts.txt -np 4 ./mpi 256.txt > 256_np4.txt 
+real	0m4.140s
+user	0m0.275s
+sys	0m0.175s
+
+k02-13@vm-1:~$ time mpirun -hostfile hosts.txt -np 4 ./mpi 512.txt > 512_np4.txt 
+real	0m14.538s
+user	0m0.959s
+sys	0m0.796s
+
+k02-13@vm-1:~$ time mpirun -hostfile hosts.txt -np 4 ./mpi 1024.txt > 1024_np4.txt
+
+real	0m49.522s
+user	0m8.071s
+sys	0m7.300s
+
+k02-13@vm-1:~$ time mpirun -hostfile hosts.txt -np 4 ./mpi 2048.txt > 2048_np4.txt
+
+real	5m2.916s
+user	1m4.070s
+sys	0m57.807s
+
+k02-13@vm-1:~$ time mpirun -hostfile hosts.txt -np 8 ./mpi 2048.txt > 2048_np8.txt
+--------------------------------------------------------------------------
+There are not enough slots available in the system to satisfy the 8
+slots that were requested by the application:
+
+  ./mpi
+
+Either request fewer slots for your application, or make more slots
+available for use.
