@@ -109,7 +109,9 @@ int main() {
     Matrix m;
     
     readMatrix(m);
+
     auto start = std::chrono::high_resolution_clock::now();
+    
     matrixInversion(m);
 
     auto stop = std::chrono::high_resolution_clock::now();
