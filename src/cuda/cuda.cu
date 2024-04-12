@@ -1,7 +1,6 @@
 #include <iostream>
 #include <cmath>
 #include <stdio.h>
-#define BLOCK_SIZE 32
 
 using namespace std;
 
@@ -33,7 +32,7 @@ void allocateMatrix(Matrix &m, int size) {
     m.mat = new double[m.rows * m.cols];
     for(int i = 0; i < size; ++i) {
         for(int j = 0; j < 2*size; ++j) {
-            setElement(m, i, j, (j == i) ? 1.0 : 0.0);
+            setElement(m, i, j, (j - size == i) ? 1.0 : 0.0);
         }
     }
 }
@@ -50,7 +49,16 @@ void readMatrix(Matrix &m) {
         }
 }
 
-__device__ void printMatrix(const Matrix &m) {
+void printMatrix(const Matrix &m) {
+    for(int i = 0; i < m.rows; ++i) {
+        for(int j = 0; j < m.cols; ++j) {
+            printf("%lf ", getElement(m, i, j));
+        }
+        printf("\n");
+    }
+}
+
+__device__ void printMatrixDev(const Matrix &m) {
     for(int i = 0; i < m.rows; ++i) {
         for(int j = 0; j < m.cols; ++j) {
             printf("%lf ", getElementDev(m, i, j));
@@ -59,61 +67,81 @@ __device__ void printMatrix(const Matrix &m) {
     }
 }
 
-__device__ int calculateRowStart(int n_rows, int threadNum) {
-    int rows_per_process = n_rows / BLOCK_SIZE;
-    int rem = n_rows % BLOCK_SIZE;
+__device__ int calculateRowStart(int n_rows, int threadNum, int blockSize) {
+    int rows_per_process = n_rows / blockSize;
+    int rem = n_rows % blockSize;
     return (threadNum <= rem) ? (rows_per_process + 1) * threadNum : (rows_per_process + 1) * rem + rows_per_process * (threadNum - rem);;
 }
 
-__device__ Matrix generateSubmatrix(Matrix &big_mat, int threadNum) {
-    int rows_per_process = big_mat.rows / BLOCK_SIZE;
-    int rem = big_mat.rows % BLOCK_SIZE;
+__device__ Matrix generateSubmatrix(Matrix &big_mat, int threadNum, int blockSize) {
+    int rows_per_process = big_mat.rows / blockSize;
+    int rem = big_mat.rows % blockSize;
 
     Matrix sub_mat;
     sub_mat.rows = (threadNum < rem) ? (rows_per_process + 1) : rows_per_process;
     sub_mat.cols = big_mat.cols;
 
-    int row_start = calculateRowStart(big_mat.rows, threadNum);
+    int row_start = calculateRowStart(big_mat.rows, threadNum, blockSize);
     sub_mat.mat = &big_mat.mat[row_start * sub_mat.cols];
 
     return sub_mat;
 }
 
-__global__ void matrixInversion(Matrix m, Matrix res) { 
-    Matrix local_mat = generateSubmatrix(m, threadIdx.x);
+__global__ void matrixInversion(Matrix m, Matrix res, int blockSize) { 
+    Matrix local_mat = generateSubmatrix(m, threadIdx.x, blockSize);
 
     extern __shared__ double pivot[];
 
-    int thread_pivot_row_start = calculateRowStart(m.rows, threadIdx.x);
+    int thread_pivot_row_start = calculateRowStart(m.rows, threadIdx.x, blockSize);
     int thread_pivot_row_end = thread_pivot_row_start + local_mat.rows;
+    int n = m.rows;
+
+    if (threadIdx.x == 1) {
+        
+    }
 
     for (int i = 0; i < n; ++i) {
-        if (i <= thread_pivot_row_start && i < thread_pivot_row_end) {
-            double d = getElementDev(m, i - thread_pivot_row_start, i);
+        if (thread_pivot_row_start <= i && i < thread_pivot_row_end) {
+            double d = getElementDev(local_mat, i - thread_pivot_row_start, i);
 
-            for (int j = 0; j < i; ++j)
-                pivot[j] = 0;
-
-            for (int j = i; j < 2 * n; ++j) {
-                double x = getElementDev(m, i - thread_pivot_row_start, j) / d;
-                setElementDev(m, i - thread_pivot_row_start, j, x);
+            for (int j = 0; j < 2 * n; ++j) {
+                double x = getElementDev(local_mat, i - thread_pivot_row_start, j) / d;
+                setElementDev(local_mat, i - thread_pivot_row_start, j, x);
                 pivot[j] = x;
+                // printf("%lf ", x);
             }
+            // printf("\n");
         }
 
         __syncthreads();
-        for (int local_i = 0; local_i < m.rows; local_i++) {
-            double factor = getElementDev(m, local_i, i);
-            for (int j = i; j < 2 * n; ++j) {
-                double x = getElementDev(m, local_i, j);
-                setElementDev(m, i - thread_pivot_row_start, j, x - (pivot[j] * factor));
+        for (int local_i = 0; local_i < local_mat.rows; local_i++) {
+            if (thread_pivot_row_start <= i && i < thread_pivot_row_end && local_i == i - thread_pivot_row_start)
+                continue;
+
+            double factor = getElementDev(local_mat, local_i, i);
+
+            if (threadIdx.x == 1) {
+                // printf("i %d\n", i);
+                // printf("factor %lf\n", factor);
+            }
+
+            for (int j = 0; j < 2 * n; ++j) {
+                double x = getElementDev(local_mat, local_i, j);
+                double y = x - (pivot[j] * factor);
+                setElementDev(local_mat, local_i, j, y);
+                if (threadIdx.x == 1) {
+                    // printf("%lf ", y);
+                }
+            }
+            if (threadIdx.x == 1) {
+                // printf("\n\n");
             }
         }
         __syncthreads();
     }
 
     for (int i = thread_pivot_row_start; i < thread_pivot_row_end; i++) {
-        for (j = 0;j < res.cols;j++) {
+        for (int j = 0;j < res.cols;j++) {
             double x = getElementDev(local_mat, i - thread_pivot_row_start, j + m.rows);
             setElementDev(res, i, j, x);
         }
@@ -136,7 +164,10 @@ int main(void) {
     d_res.cols = m.cols / 2;
     cudaMalloc((void**)&d_res.mat, size / 2);
 
-    matrixInversion<<<1, BLOCK_SIZE>>>(d_m, d_res);
+    int blockSize = m.rows;
+    int sharedMemSize = blockSize * sizeof(double) * 2;
+
+    matrixInversion<<<1, blockSize, sharedMemSize>>>(d_m, d_res, blockSize);
 
     Matrix res;
     res.rows = m.rows;
@@ -145,6 +176,7 @@ int main(void) {
 
     cudaMemcpy(res.mat, d_res.mat, size / 2, cudaMemcpyDeviceToHost);
 
+    printMatrix(res);
     cudaFree(d_m.mat);
     cudaFree(d_res.mat);
     

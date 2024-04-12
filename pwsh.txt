@@ -1,0 +1,2 @@
+Measure-Command { Get-Content ..\..\test_cases\512.txt | .\serial | Out-File output.txt }
+Measure-Command { Get-Content ..\..\test_cases\512.txt | .\cuda | Out-File output.txt }
