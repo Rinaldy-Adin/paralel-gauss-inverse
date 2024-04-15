@@ -2,6 +2,9 @@
 #include <cmath>
 #include <stdio.h>
 
+#define MAX_SHARED_MEM 2048
+#define MAX_BLOCK_SIZE 1024
+
 using namespace std;
 
 struct Matrix {
@@ -105,10 +108,6 @@ __global__ void matrixInversion(Matrix m, int blockSize) {
     int thread_pivot_row_end = thread_pivot_row_start + local_mat.rows;
     int n = m.rows;
 
-    if (threadIdx.x == 1) {
-        
-    }
-
     for (int i = 0; i < n; ++i) {
         if (thread_pivot_row_start <= i && i < thread_pivot_row_end) {
             double d = getElementDev(local_mat, i - thread_pivot_row_start, i);
@@ -116,37 +115,35 @@ __global__ void matrixInversion(Matrix m, int blockSize) {
             for (int j = 0; j < 2 * n; ++j) {
                 double x = getElementDev(local_mat, i - thread_pivot_row_start, j) / d;
                 setElementDev(local_mat, i - thread_pivot_row_start, j, x);
-                pivot[j] = x;
-                // printf("%lf ", x);
             }
-            // printf("\n");
         }
 
-        __syncthreads();
-        for (int local_i = 0; local_i < local_mat.rows; local_i++) {
-            if (thread_pivot_row_start <= i && i < thread_pivot_row_end && local_i == i - thread_pivot_row_start)
-                continue;
+        for (int col_block_i = (m.cols - 1) / MAX_SHARED_MEM; col_block_i >= 0; col_block_i--) {
+            int col_block_j_start = col_block_i * MAX_SHARED_MEM;
+            int col_block_j_end = min((col_block_i + 1) * MAX_SHARED_MEM, m.cols);
 
-            double factor = getElementDev(local_mat, local_i, i);
 
-            if (threadIdx.x == 1) {
-                // printf("i %d\n", i);
-                // printf("factor %lf\n", factor);
-            }
-
-            for (int j = 0; j < 2 * n; ++j) {
-                double x = getElementDev(local_mat, local_i, j);
-                double y = x - (pivot[j] * factor);
-                setElementDev(local_mat, local_i, j, y);
-                if (threadIdx.x == 1) {
-                    // printf("%lf ", y);
+            if (thread_pivot_row_start <= i && i < thread_pivot_row_end) {
+                for (int j = col_block_j_start; j < col_block_j_end; j++) {
+                    pivot[j - col_block_j_start] = getElementDev(local_mat, i - thread_pivot_row_start, j);
                 }
             }
-            if (threadIdx.x == 1) {
-                // printf("\n\n");
+            __syncthreads();
+
+            for (int local_i = 0; local_i < local_mat.rows; local_i++) {
+                if (thread_pivot_row_start <= i && i < thread_pivot_row_end && local_i == i - thread_pivot_row_start)
+                    continue;
+
+                double factor = getElementDev(local_mat, local_i, i);
+
+                for (int j = col_block_j_start; j < col_block_j_end; ++j) {
+                    double x = getElementDev(local_mat, local_i, j);
+                    double y = x - (pivot[j - col_block_j_start] * factor);
+                    setElementDev(local_mat, local_i, j, y);
+                }
             }
+            __syncthreads();
         }
-        __syncthreads();
     }
 }
 
@@ -161,7 +158,7 @@ int main(void) {
     cudaMalloc((void**)&d_m.mat, size);
     cudaMemcpy(d_m.mat, m.mat, size, cudaMemcpyHostToDevice);    
 
-    int blockSize = m.rows;
+    int blockSize = min(MAX_BLOCK_SIZE, m.rows);
     int sharedMemSize = blockSize * sizeof(double) * 2;
 
     matrixInversion<<<1, blockSize, sharedMemSize>>>(d_m, blockSize);
