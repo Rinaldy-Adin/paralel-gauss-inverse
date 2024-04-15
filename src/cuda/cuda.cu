@@ -58,6 +58,15 @@ void printMatrix(const Matrix &m) {
     }
 }
 
+void printIdent(const Matrix &m) {
+    for(int i = 0; i < m.rows; ++i) {
+        for(int j = m.rows; j < m.cols; ++j) {
+            printf("%lf ", getElement(m, i, j));
+        }
+        printf("\n");
+    }
+}
+
 __device__ void printMatrixDev(const Matrix &m) {
     for(int i = 0; i < m.rows; ++i) {
         for(int j = 0; j < m.cols; ++j) {
@@ -87,7 +96,7 @@ __device__ Matrix generateSubmatrix(Matrix &big_mat, int threadNum, int blockSiz
     return sub_mat;
 }
 
-__global__ void matrixInversion(Matrix m, Matrix res, int blockSize) { 
+__global__ void matrixInversion(Matrix m, int blockSize) { 
     Matrix local_mat = generateSubmatrix(m, threadIdx.x, blockSize);
 
     extern __shared__ double pivot[];
@@ -139,13 +148,6 @@ __global__ void matrixInversion(Matrix m, Matrix res, int blockSize) {
         }
         __syncthreads();
     }
-
-    for (int i = thread_pivot_row_start; i < thread_pivot_row_end; i++) {
-        for (int j = 0;j < res.cols;j++) {
-            double x = getElementDev(local_mat, i - thread_pivot_row_start, j + m.rows);
-            setElementDev(res, i, j, x);
-        }
-    }
 }
 
 int main(void) {
@@ -159,26 +161,16 @@ int main(void) {
     cudaMalloc((void**)&d_m.mat, size);
     cudaMemcpy(d_m.mat, m.mat, size, cudaMemcpyHostToDevice);    
 
-    Matrix d_res;
-    d_res.rows = m.rows;
-    d_res.cols = m.cols / 2;
-    cudaMalloc((void**)&d_res.mat, size / 2);
-
     int blockSize = m.rows;
     int sharedMemSize = blockSize * sizeof(double) * 2;
 
-    matrixInversion<<<1, blockSize, sharedMemSize>>>(d_m, d_res, blockSize);
+    matrixInversion<<<1, blockSize, sharedMemSize>>>(d_m, blockSize);
 
-    Matrix res;
-    res.rows = m.rows;
-    res.cols = m.cols / 2;
-    res.mat = new double[res.rows * res.cols];
+    cudaMemcpy(m.mat, d_m.mat, size, cudaMemcpyDeviceToHost);
 
-    cudaMemcpy(res.mat, d_res.mat, size / 2, cudaMemcpyDeviceToHost);
-
-    printMatrix(res);
+    printf("%d\n", m.rows);
+    printIdent(m);
     cudaFree(d_m.mat);
-    cudaFree(d_res.mat);
     
     cudaDeviceSynchronize();
 
