@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "*.embeddedhtml": "html",
+        "*.pl": "prolog",
+        "array": "c",
+        "deque": "c",
+        "string": "c",
+        "unordered_map": "c",
+        "vector": "c",
+        "string_view": "c",
+        "initializer_list": "c",
+        "functional": "c",
+        "chrono": "cpp"
+    },
+    "C_Cpp.errorSquiggles": "enabled"
+}
